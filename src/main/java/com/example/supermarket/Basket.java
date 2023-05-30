@@ -1,45 +1,70 @@
 package com.example.supermarket;
 
+import com.example.supermarket.offers.Discount;
+import com.example.supermarket.offers.Offer;
+
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 
 public class Basket {
-    private Map<Item, Double> items;
+    private List<Item> items;
 
     public Basket() {
-        items = new HashMap<>();
+        items = new ArrayList<>();
     }
 
-    public Double getQuanity(Item item) {
-        if (items.containsKey(item)) {
-            return items.get(item);
-        }
-        return 0d;
+    private Basket(List<Item> items) {
+        this.items = items;
     }
 
-    public void addItem(Item item, Double quantity) {
-        if (items.containsKey(item)) {
-            items.put(item, items.get(item) + quantity);
-        } else {
-            items.put(item, quantity);
-        }
+    public void addItem(Item item) {
+        items.add(item);
     }
 
-    public Receipt getReceipt() {
+    public long itemsMatching(Collection<Item> filterItems) {
+        return items.stream().filter(filterItems::contains).count();
+    }
+
+    public List<Item> getItems() {
+        return List.copyOf(items);
+    }
+
+    public void addItem(UnitPricedItem item, Double quantity) {
+        items.add(new Item(
+                String.format("%s %f %s @ %d p/%s", item.name(), quantity, item.unit(), item.pennyCostPerUnit(), item.unit()),
+                (int) Math.round(quantity * item.pennyCostPerUnit())));
+    }
+
+    public Receipt getReceipt(List<Offer> offers) {
         List<ReceiptEntry> entries = new ArrayList<>();
-        items.forEach((item, quantity) -> {
-            if (item.hasUnit()) {
-                entries.add(new ReceiptEntry(
-                        String.format("%s \n %f%s @ %d p/%s", item.name(), quantity, item.unit(), item.pennyCost(), item.unit()),
-                        (int) Math.round(quantity * item.pennyCost())));
-            } else {
-                for (int i = 0; i < quantity; i++) {
-                    entries.add(new ReceiptEntry(item.name(), item.pennyCost()));
+        items.forEach(item -> entries.add(new ReceiptEntry(item.name(), item.pennyCost())));
+        List<ReceiptEntry> discounts = new ArrayList<>();
+
+        Basket remainder = this;
+        boolean discountFound;
+        do {
+            // find an applicable offer
+            Optional<Discount> discount = Optional.empty();
+            for (Offer offer : offers) {
+                discount = offer.getDiscount(remainder);
+                if (discount.isPresent()) {
+                    break;
                 }
             }
-        });
-        return new Receipt(entries, new ArrayList<>());
+            discountFound = discount.isPresent();
+            // apply it
+            if (discountFound) {
+                discounts.add(new ReceiptEntry(discount.get().description(), -discount.get().pennySaving()));
+                List<Item> prunedItems = new ArrayList<>(remainder.getItems());
+                for (Item discounted : discount.get().items()) {
+                    prunedItems.remove(discounted);
+                }
+                remainder = new Basket(prunedItems);
+            }
+        } while (discountFound);
+
+        return new Receipt(entries, discounts);
     }
 }
